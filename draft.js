@@ -319,6 +319,8 @@ async function initYahooPanel() {
   const leagueSel = document.getElementById("y-league");
   const teamSel = document.getElementById("y-team");
   const btnLoad = document.getElementById("y-load-roster");
+  const dateInput = document.getElementById("y-date");
+  const btnToday = document.getElementById("y-today");
 
   if (!status) return; // panel not present
 
@@ -333,8 +335,23 @@ async function initYahooPanel() {
     window.location.href = "/api/auth/yahoo";
   });
   btnRefresh.addEventListener("click", async () => {
-    await loadGames();
+    // On refresh, fetch league settings and players and render into the main table
+    try {
+      await refreshLeagueData();
+    } catch (e) {
+      console.error("Refresh data failed", e);
+      await loadGames();
+    }
   });
+  if (btnToday) btnToday.addEventListener("click", () => {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    if (dateInput) dateInput.value = `${yyyy}-${mm}-${dd}`;
+    refreshLeagueData();
+  });
+  if (dateInput) dateInput.addEventListener("change", () => { refreshLeagueData(); });
 
   async function loadGames() {
     try {
@@ -359,7 +376,11 @@ async function initYahooPanel() {
           }
         })(data);
       }
-      gameSel.innerHTML = games.map(g => `<option value="${g.game_key}">${toLabel(g)}</option>`).join("");
+      gameSel.innerHTML = games.map(g => {
+        const nm = g.name || g.code || 'Game';
+        const season = g.season ? ` ${g.season}` : '';
+        return `<option value="${g.game_key}">${nm}${season}</option>`;
+      }).join("");
       // Prefer NBA if present
       const nbaIdx = games.findIndex(g => String(g.code).toLowerCase().includes("nba") || String(g.name).toLowerCase().includes("basketball"));
       if (nbaIdx >= 0) gameSel.selectedIndex = nbaIdx;
@@ -386,8 +407,26 @@ async function initYahooPanel() {
           for (const k in o) scan(o[k]);
         }
       })(data);
-      leagueSel.innerHTML = leagues.map(l => `<option value="${l.league_key}">${l.name || l.league_key}</option>`).join("");
+      leagueSel.innerHTML = leagues.map(l => {
+        const nm = (l.name && (l.name.full || l.name)) || l.league_key;
+        const season = l.season ? ` ${l.season}` : '';
+        return `<option value="${l.league_key}">${nm}${season}</option>`;
+      }).join("");
+      // If exactly one league, select it
+      if (leagues.length === 1) {
+        leagueSel.selectedIndex = 0;
+      }
+      // If URL param league exists, try to select it
+      const pLeague = getUrlParam('league');
+      if (pLeague) {
+        const idx = leagues.findIndex(l => l.league_key === pLeague);
+        if (idx >= 0) leagueSel.selectedIndex = idx;
+      }
       await loadTeams();
+      // Auto refresh if league is selected
+      if (leagueSel.value) {
+        await refreshLeagueData();
+      }
     } catch (e) {
       leagueSel.innerHTML = "";
     }
@@ -417,22 +456,41 @@ async function initYahooPanel() {
   }
 
   gameSel.addEventListener('change', loadLeagues);
-  leagueSel.addEventListener('change', loadTeams);
+  leagueSel.addEventListener('change', async () => { await loadTeams(); await refreshLeagueData(); });
+
+  function extractYahooPlayerIds(obj, out = new Set()) {
+    (function scan(o){
+      if (!o) return;
+      if (Array.isArray(o)) return o.forEach(scan);
+      if (typeof o === 'object') {
+        if (o.player_id) out.add(String(o.player_id));
+        for (const k in o) scan(o[k]);
+      }
+    })(obj);
+    return out;
+  }
 
   btnLoad.addEventListener('click', async () => {
     const tk = teamSel.value;
     if (!tk) return;
     try {
       const data = await yGET(`/api/yahoo/roster?team_key=${encodeURIComponent(tk)}`);
-      const names = Array.from(extractYahooNames(data));
-      const idx = buildPlayerIndex(state.players);
-      const matches = new Set();
-      for (const nm of names) {
-        const key = normalizeName(nm);
-        const hit = idx.get(key);
-        if (hit) matches.add(hit.player_id);
+      const ids = extractYahooPlayerIds(data);
+      if (ids.size) {
+        // Prefer direct Yahoo IDs if present (state.players now uses Yahoo ids)
+        state.myRoster = ids;
+      } else {
+        // Fallback to name matching
+        const names = Array.from(extractYahooNames(data));
+        const idx = buildPlayerIndex(state.players);
+        const matches = new Set();
+        for (const nm of names) {
+          const key = normalizeName(nm);
+          const hit = idx.get(key);
+          if (hit) matches.add(hit.player_id);
+        }
+        state.myRoster = matches;
       }
-      state.myRoster = matches;
       renderTable();
       renderTotals();
       // Turn on highlight by default
@@ -443,6 +501,9 @@ async function initYahooPanel() {
     }
   });
 
+  // Initialize date from URL if present
+  const pDate = getUrlParam('date');
+  if (dateInput && pDate) dateInput.value = pDate;
   await loadGames();
 }
 
@@ -463,3 +524,162 @@ async function init() {
 }
 
 document.addEventListener("DOMContentLoaded", init);
+
+// ---- Live league players rendering ----
+function getUrlParam(name) {
+  const sp = new URLSearchParams(location.search);
+  return sp.get(name);
+}
+
+function buildStatMapFromSettings(settings) {
+  const map = new Map(); // id -> {name, display_name, abbr}
+  (function scan(o){
+    if (!o) return;
+    if (Array.isArray(o)) return o.forEach(scan);
+    if (typeof o === 'object') {
+      if (o.stat_id && (o.name || o.display_name)) {
+        map.set(String(o.stat_id), { name: o.name, display_name: o.display_name, abbr: o.abbr });
+      }
+      for (const k in o) scan(o[k]);
+    }
+  })(settings);
+  return map;
+}
+
+function findAllPlayers(obj) {
+  const out = [];
+  (function scan(o){
+    if (!o) return;
+    if (Array.isArray(o)) return o.forEach(scan);
+    if (typeof o === 'object') {
+      if (o.player && (o.player.player_id || (o.player.name && o.player.name.full))) {
+        out.push(o.player);
+      }
+      for (const k in o) scan(o[k]);
+    }
+  })(obj);
+  return out;
+}
+
+function statsArrayFromPlayer(player) {
+  // Try common locations: player.stats.stats, player.player_stats.stats
+  const bins = [];
+  (function scan(o){
+    if (!o) return;
+    if (Array.isArray(o)) return o.forEach(scan);
+    if (typeof o === 'object') {
+      if (o.stats && Array.isArray(o.stats)) bins.push(o.stats);
+      if (o.stats && o.stats.stats && Array.isArray(o.stats.stats)) bins.push(o.stats.stats);
+      for (const k in o) scan(o[k]);
+    }
+  })(player);
+  // Flatten to array of {stat_id,value}
+  const arr = [];
+  for (const bin of bins) {
+    for (const item of bin) {
+      const s = item.stat || item;
+      if (s && s.stat_id != null) arr.push({ stat_id: String(s.stat_id), value: Number(s.value) });
+    }
+  }
+  return arr;
+}
+
+function transformYahooPlayersToRows(players, statMap, statWeights) {
+  // Build quick lookup of important stat ids by display name
+  let idByLabel = {};
+  for (const [id, meta] of statMap.entries()) {
+    const label = String(meta.display_name || meta.name || "").toUpperCase();
+    if (label.includes("PTS") && !idByLabel.PTS) idByLabel.PTS = id;
+    if (label === "REB" || label.includes("REBOUNDS")) idByLabel.REB = idByLabel.REB || id;
+    if (label === "AST" || label.includes("ASSISTS")) idByLabel.AST = idByLabel.AST || id;
+    if (label === "STL" || label.includes("STEALS")) idByLabel.STL = idByLabel.STL || id;
+    if (label === "BLK" || label.includes("BLOCKS")) idByLabel.BLK = idByLabel.BLK || id;
+    if (label === "MIN" || label.includes("MINUTES")) idByLabel.MIN = idByLabel.MIN || id;
+    if (label.includes("FANTASY POINT")) idByLabel.FPTS = idByLabel.FPTS || id;
+    if (label === "GP" || label.includes("GAMES PLAYED")) idByLabel.GP = idByLabel.GP || id;
+  }
+
+  const rows = [];
+  for (const p of players) {
+    const pid = String(p.player_id || p.editorial_player_id || normalizeName(p.name && p.name.full));
+    const name = p.name && p.name.full ? p.name.full : (p.name || "");
+    const team = p.editorial_team_abbr || p.editorial_team_full_name || "";
+    const pos = p.display_position || (p.eligible_positions && Array.isArray(p.eligible_positions) ? p.eligible_positions.join(',') : "");
+    const statsArr = statsArrayFromPlayer(p);
+    const byId = new Map(statsArr.map(s => [s.stat_id, s.value]));
+
+    const row = {
+      player_id: pid,
+      player: name,
+      team,
+      pos,
+      gp: byId.get(idByLabel.GP) || 0,
+      min: byId.get(idByLabel.MIN) || 0,
+      fpts: 0,
+      pts: byId.get(idByLabel.PTS) || 0,
+      reb: byId.get(idByLabel.REB) || 0,
+      ast: byId.get(idByLabel.AST) || 0,
+      stl: byId.get(idByLabel.STL) || 0,
+      blk: byId.get(idByLabel.BLK) || 0,
+    };
+    if (idByLabel.FPTS && byId.has(idByLabel.FPTS)) {
+      row.fpts = byId.get(idByLabel.FPTS) || 0;
+    } else if (statWeights && statWeights.size) {
+      let sum = 0;
+      for (const [sid, val] of byId.entries()) {
+        const w = statWeights.get(String(sid));
+        if (typeof w === 'number') sum += val * w;
+      }
+      row.fpts = sum;
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+async function refreshLeagueData() {
+  const leagueSel = document.getElementById("y-league");
+  let league = leagueSel && leagueSel.value;
+  if (!league) {
+    // Try URL param ?league=...
+    league = getUrlParam('league');
+  }
+  if (!league) throw new Error("No league selected");
+  const sort_type = getUrlParam('sort_type');
+  const date = getUrlParam('date');
+  const qs = new URLSearchParams({ league });
+  const qsPlayers = new URLSearchParams({ league });
+  if (sort_type) qsPlayers.set('sort_type', sort_type);
+  if (date) qsPlayers.set('date', date);
+
+  const [settings, playersRaw] = await Promise.all([
+    yGET(`/api/yahoo/league-settings?${qs.toString()}`),
+    yGET(`/api/yahoo/league-players?${qsPlayers.toString()}`),
+  ]);
+  const { statMap, statWeights } = parseSettings(settings);
+  const players = findAllPlayers(playersRaw);
+  const rows = transformYahooPlayersToRows(players, statMap, statWeights);
+  state.players = rows;
+  renderTable();
+}
+
+function parseSettings(settings) {
+  const statMap = buildStatMapFromSettings(settings);
+  const statWeights = buildStatWeightsFromSettings(settings);
+  return { statMap, statWeights };
+}
+
+function buildStatWeightsFromSettings(settings) {
+  const weights = new Map();
+  (function scan(o){
+    if (!o) return;
+    if (Array.isArray(o)) return o.forEach(scan);
+    if (typeof o === 'object') {
+      if (o.stat_id != null && typeof o.value === 'number') {
+        weights.set(String(o.stat_id), Number(o.value));
+      }
+      for (const k in o) scan(o[k]);
+    }
+  })(settings);
+  return weights;
+}
