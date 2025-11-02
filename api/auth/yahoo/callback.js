@@ -1,5 +1,5 @@
 const { exchangeCodeForToken } = require("../../_yahoo");
-const { ensureSession, getTokens, setTokens } = require("../../_tokenStore");
+const { ensureSession, setTokens } = require("../../_tokenStore");
 
 function getQuery(req) {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -17,7 +17,7 @@ module.exports = async (req, res) => {
     }
     // Optional: validate state === sid for CSRF mitigation if we persist state
     const tokens = await exchangeCodeForToken(q.code);
-    setTokens(sid, tokens);
+    setTokens(sid, tokens, res);
     // Redirect back to simple dashboard page
     res.statusCode = 302;
     res.setHeader("Location", "/yahoo.html");
@@ -28,4 +28,3 @@ module.exports = async (req, res) => {
     res.end(JSON.stringify({ error: e.message }));
   }
 };
-

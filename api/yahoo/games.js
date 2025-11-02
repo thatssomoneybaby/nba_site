@@ -4,7 +4,7 @@ const { yahooApi, refreshAccessToken } = require("../_yahoo");
 module.exports = async (req, res) => {
   try {
     const sid = ensureSession(req, res);
-    let { access_token, refresh_token } = getTokens(sid);
+    let { access_token, refresh_token } = getTokens(sid, req);
     if (!access_token) {
       res.statusCode = 401;
       res.json({ error: "Not authenticated" });
@@ -17,7 +17,7 @@ module.exports = async (req, res) => {
     } catch (err) {
       if (err.status === 401 && refresh_token) {
         const fresh = await refreshAccessToken(refresh_token);
-        setTokens(sid, fresh);
+        setTokens(sid, fresh, res);
         const data = await yahooApi("/users;use_login=1/games", fresh.access_token);
         res.statusCode = 200;
         res.json(data);
@@ -31,4 +31,3 @@ module.exports = async (req, res) => {
     res.end(JSON.stringify({ error: e.message, details: e.body }));
   }
 };
-

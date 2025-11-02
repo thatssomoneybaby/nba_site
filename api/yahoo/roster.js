@@ -16,7 +16,7 @@ module.exports = async (req, res) => {
       res.json({ error: "Missing team_key param" });
       return;
     }
-    let { access_token, refresh_token } = getTokens(sid);
+    let { access_token, refresh_token } = getTokens(sid, req);
     if (!access_token) {
       res.statusCode = 401;
       res.json({ error: "Not authenticated" });
@@ -30,7 +30,7 @@ module.exports = async (req, res) => {
     } catch (err) {
       if (err.status === 401 && refresh_token) {
         const fresh = await refreshAccessToken(refresh_token);
-        setTokens(sid, fresh);
+        setTokens(sid, fresh, res);
         const data = await yahooApi(path, fresh.access_token);
         res.statusCode = 200;
         res.json(data);
@@ -44,4 +44,3 @@ module.exports = async (req, res) => {
     res.end(JSON.stringify({ error: e.message, details: e.body }));
   }
 };
-
