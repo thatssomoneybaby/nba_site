@@ -1,15 +1,12 @@
-const LS_DRAFT_KEY = "draftHelper:v1:2024-25:default:drafted";
-const LS_FILTERS_KEY = "draftHelper:v1:filters";
+const LS_FILTERS_KEY = "fantasyHelper:v1:filters";
 
 const state = {
   players: [],
-  drafted: new Set(),
   myRoster: new Set(),
   currentLeague: null,
   filters: {
     query: "",
     pos: "",
-    hideDrafted: false,
     sortKey: "fpts",
     sortDir: -1, // desc
     highlightRoster: true,
@@ -19,17 +16,9 @@ const state = {
 
 function loadPersisted() {
   try {
-    const raw = localStorage.getItem(LS_DRAFT_KEY);
-    if (raw) state.drafted = new Set(JSON.parse(raw));
-  } catch {}
-  try {
     const f = JSON.parse(localStorage.getItem(LS_FILTERS_KEY) || "{}");
     Object.assign(state.filters, f);
   } catch {}
-}
-
-function persistDrafted() {
-  localStorage.setItem(LS_DRAFT_KEY, JSON.stringify([...state.drafted]));
 }
 
 function persistFilters() {
@@ -43,7 +32,6 @@ function formatNum(n) {
 function visibleRows() {
   const q = state.filters.query.trim().toLowerCase();
   const pos = state.filters.pos;
-  const hide = state.filters.hideDrafted;
   const onlyRoster = state.filters.onlyRoster;
   let rows = state.players;
   if (q) {
@@ -54,9 +42,6 @@ function visibleRows() {
   }
   if (pos) {
     rows = rows.filter((p) => (p.pos || "").toUpperCase().includes(pos));
-  }
-  if (hide) {
-    rows = rows.filter((p) => !state.drafted.has(p.player_id));
   }
   if (onlyRoster) {
     rows = rows.filter((p) => state.myRoster.has(p.player_id));
@@ -73,15 +58,6 @@ function visibleRows() {
   return rows;
 }
 
-function renderCounters() {
-  const total = state.players.length;
-  const drafted = state.drafted.size;
-  const remaining = total - drafted;
-  document.getElementById("count-drafted").textContent = `Drafted: ${drafted}`;
-  document.getElementById("count-remaining").textContent = `Remaining: ${remaining}`;
-  document.getElementById("count-total").textContent = `Total: ${total}`;
-}
-
 function renderTable() {
   const tbody = document.getElementById("tbody");
   const empty = document.getElementById("empty");
@@ -90,7 +66,6 @@ function renderTable() {
 
   if (!rows.length) {
     empty.hidden = false;
-    renderCounters();
     return;
   }
   empty.hidden = true;
@@ -98,34 +73,13 @@ function renderTable() {
   const frag = document.createDocumentFragment();
   for (const p of rows) {
     const tr = document.createElement("tr");
-    const isDrafted = state.drafted.has(p.player_id);
     const isMy = state.myRoster.has(p.player_id);
-
-    const tdCheck = document.createElement("td");
-    tdCheck.className = "col-check";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = isDrafted;
-    checkbox.ariaLabel = `Draft ${p.player}`;
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked) state.drafted.add(p.player_id);
-      else state.drafted.delete(p.player_id);
-      persistDrafted();
-      if (state.filters.hideDrafted) {
-        renderTable();
-      } else {
-        // toggle visual state only
-        nameCell.classList.toggle("drafted", checkbox.checked);
-      }
-      renderCounters();
-    });
-    tdCheck.appendChild(checkbox);
 
     const tdPlayer = document.createElement("td");
     tdPlayer.className = "player";
     const nameCell = document.createElement("span");
     nameCell.textContent = p.player;
-    nameCell.className = [isDrafted ? "drafted" : "", (isMy && state.filters.highlightRoster) ? "on-roster" : ""].filter(Boolean).join(" ");
+    nameCell.className = [(isMy && state.filters.highlightRoster) ? "on-roster" : ""].filter(Boolean).join(" ");
     tdPlayer.appendChild(nameCell);
 
     const tdTeam = document.createElement("td");
@@ -162,7 +116,6 @@ function renderTable() {
 
     if (isMy && state.filters.highlightRoster) tr.classList.add("row-on-roster");
     tr.append(
-      tdCheck,
       tdPlayer,
       tdTeam,
       tdPos,
@@ -179,7 +132,6 @@ function renderTable() {
   }
 
   tbody.appendChild(frag);
-  renderCounters();
   renderTotals();
 }
 
@@ -188,14 +140,13 @@ function wireControls() {
   const pos = document.getElementById("pos");
   const sort = document.getElementById("sort");
   const hideDrafted = document.getElementById("hideDrafted");
-  const reset = document.getElementById("reset");
+  const reset = null;
   const yHighlight = document.getElementById("y-highlight");
   const yFilter = document.getElementById("y-filter");
 
   // Init from persisted filters
   search.value = state.filters.query || "";
   pos.value = state.filters.pos || "";
-  hideDrafted.checked = !!state.filters.hideDrafted;
   sort.value = `${state.filters.sortKey}:${state.filters.sortDir === -1 ? "desc" : "asc"}`;
   if (yHighlight) yHighlight.checked = !!state.filters.highlightRoster;
   if (yFilter) yFilter.checked = !!state.filters.onlyRoster;
@@ -216,10 +167,7 @@ function wireControls() {
     state.filters.sortDir = dir === "desc" ? -1 : 1;
     syncAndRender();
   });
-  hideDrafted.addEventListener("change", () => {
-    state.filters.hideDrafted = hideDrafted.checked;
-    syncAndRender();
-  });
+  if (hideDrafted) hideDrafted.addEventListener("change", () => {});
   if (yHighlight) yHighlight.addEventListener("change", () => {
     state.filters.highlightRoster = yHighlight.checked;
     syncAndRender();
@@ -228,12 +176,7 @@ function wireControls() {
     state.filters.onlyRoster = yFilter.checked;
     syncAndRender();
   });
-  reset.addEventListener("click", () => {
-    if (!confirm("Clear drafted selections?")) return;
-    state.drafted.clear();
-    persistDrafted();
-    renderTable();
-  });
+  if (reset) reset.addEventListener("click", () => {});
 }
 
 // ---- Yahoo integration ----
@@ -535,15 +478,7 @@ async function initYahooPanel() {
 async function init() {
   loadPersisted();
   wireControls();
-  try {
-    // Fetch from repo root; works locally and on static hosting
-    const res = await fetch("./fantasy_averages_2024_25.json", { cache: "no-store" });
-    const data = await res.json();
-    state.players = Array.isArray(data) ? data : [];
-  } catch (e) {
-    console.error("Failed to load data", e);
-    state.players = [];
-  }
+  // Start empty; Yahoo panel will populate when league is selected or URL has ?league=
   initYahooPanel();
   renderTable();
 }

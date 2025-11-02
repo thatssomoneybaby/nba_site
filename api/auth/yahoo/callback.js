@@ -20,7 +20,7 @@ module.exports = async (req, res) => {
     setTokens(sid, tokens, res);
     // Redirect back to simple dashboard page
     res.statusCode = 302;
-    res.setHeader("Location", "/yahoo.html");
+    res.setHeader("Location", "/");
     res.end();
   } catch (e) {
     res.statusCode = 500;

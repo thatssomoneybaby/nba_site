@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>NBA Fantasy Draft Helper</title>
+    <title>Fantasy Helper — Yahoo Dashboard</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <header class="site-header">
-      <h1>NBA Fantasy Draft Helper</h1>
-      <p class="sub">2024–25 per-game fantasy averages</p>
+      <h1>Fantasy Helper</h1>
+      <p class="sub">Yahoo Fantasy Dashboard</p>
     </header>
 
     <main class="container">
@@ -53,7 +53,7 @@
           <div><strong>MIN:</strong> <span id="y-min">0</span></div>
         </div>
       </section>
-      <section class="toolbar" aria-label="Draft controls">
+      <section class="toolbar" aria-label="Player controls">
         <div class="tool">
           <label for="search">Search</label>
           <input id="search" type="search" placeholder="Player or team" />
@@ -81,25 +81,12 @@
             <option value="min:desc">MIN (desc)</option>
           </select>
         </div>
-        <div class="tool checkbox">
-          <input id="hideDrafted" type="checkbox" />
-          <label for="hideDrafted">Hide drafted</label>
-        </div>
-        <div class="tool actions">
-          <button id="reset" type="button">Reset</button>
-        </div>
-        <div class="tool counters" aria-live="polite">
-          <span id="count-drafted">Drafted: 0</span>
-          <span id="count-remaining">Remaining: 0</span>
-          <span id="count-total">Total: 0</span>
-        </div>
       </section>
 
       <section class="table-wrap">
         <table id="players" class="players" aria-label="Players">
           <thead>
             <tr>
-              <th scope="col" class="sticky col-check">Pick</th>
               <th scope="col" class="sticky">Player</th>
               <th scope="col" class="sticky">Team</th>
               <th scope="col" class="sticky">Pos</th>
@@ -118,7 +105,6 @@
         <div id="empty" class="empty" hidden>No players match your filters.</div>
       </section>
     </main>
-
-    <script src="draft.js" type="module"></script>
+    <script src="app.js" type="module"></script>
   </body>
   </html>
