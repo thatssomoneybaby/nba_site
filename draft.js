@@ -5,6 +5,7 @@ const state = {
   players: [],
   drafted: new Set(),
   myRoster: new Set(),
+  currentLeague: null,
   filters: {
     query: "",
     pos: "",
@@ -474,10 +475,18 @@ async function initYahooPanel() {
     const tk = teamSel.value;
     if (!tk) return;
     try {
+      // Ensure league players are loaded BEFORE applying roster filter
+      const leagueKey = String(tk).split('.t.')[0]; // e.g., 466.l.174520
+      if (leagueSel) {
+        const opt = Array.from(leagueSel.options).find(o => o.value === leagueKey);
+        if (opt) leagueSel.value = leagueKey;
+      }
+      await refreshLeagueData(leagueKey);
+
+      // Now fetch roster and apply
       const data = await yGET(`/api/yahoo/roster?team_key=${encodeURIComponent(tk)}`);
       const ids = extractYahooPlayerIds(data);
       if (ids.size) {
-        // Prefer direct Yahoo IDs if present (state.players now uses Yahoo ids)
         state.myRoster = ids;
       } else {
         // Fallback to name matching
@@ -491,11 +500,27 @@ async function initYahooPanel() {
         }
         state.myRoster = matches;
       }
-      renderTable();
-      renderTotals();
+      // If there is zero overlap with current table, attempt name-match fallback
+      if (state.myRoster && state.myRoster.size) {
+        const tableIds = new Set(state.players.map(p => String(p.player_id)));
+        let inter = 0; for (const id of state.myRoster) if (tableIds.has(String(id))) { inter++; if (inter>0) break; }
+        if (inter === 0) {
+          const names = Array.from(extractYahooNames(data));
+          const idx = buildPlayerIndex(state.players);
+          const matches = new Set();
+          for (const nm of names) {
+            const key = normalizeName(nm);
+            const hit = idx.get(key);
+            if (hit) matches.add(hit.player_id);
+          }
+          if (matches.size) state.myRoster = matches;
+        }
+      }
       // Turn on highlight by default
       const yHighlight = document.getElementById('y-highlight');
       if (yHighlight) { yHighlight.checked = true; state.filters.highlightRoster = true; }
+      renderTable();
+      renderTotals();
     } catch (e) {
       console.error('Load roster failed', e);
     }
@@ -637,29 +662,37 @@ function transformYahooPlayersToRows(players, statMap, statWeights) {
   return rows;
 }
 
-async function refreshLeagueData() {
+async function refreshLeagueData(targetLeague) {
   const leagueSel = document.getElementById("y-league");
-  let league = leagueSel && leagueSel.value;
+  let league = targetLeague || (leagueSel && leagueSel.value);
   if (!league) {
     // Try URL param ?league=...
     league = getUrlParam('league');
   }
   if (!league) throw new Error("No league selected");
-  const sort_type = getUrlParam('sort_type');
-  const date = getUrlParam('date');
+  // Determine date/sort_type from UI first, then URL
+  const dateInput = document.getElementById('y-date');
+  const date = (dateInput && dateInput.value) || getUrlParam('date');
+  const sort_type = date ? 'date' : getUrlParam('sort_type');
   const qs = new URLSearchParams({ league });
   const qsPlayers = new URLSearchParams({ league });
   if (sort_type) qsPlayers.set('sort_type', sort_type);
   if (date) qsPlayers.set('date', date);
 
-  const [settings, playersRaw] = await Promise.all([
-    yGET(`/api/yahoo/league-settings?${qs.toString()}`),
-    yGET(`/api/yahoo/league-players?${qsPlayers.toString()}`),
-  ]);
+  const settings = await yGET(`/api/yahoo/league-settings?${qs.toString()}`);
   const { statMap, statWeights } = parseSettings(settings);
-  const players = findAllPlayers(playersRaw);
+  // Fetch players (date-based if provided)
+  let playersRaw = await yGET(`/api/yahoo/league-players?${qsPlayers.toString()}`);
+  let players = findAllPlayers(playersRaw);
+  // If date-based request returns empty, fall back to non-date
+  if ((date || sort_type === 'date') && players.length === 0) {
+    const qsNoDate = new URLSearchParams({ league });
+    playersRaw = await yGET(`/api/yahoo/league-players?${qsNoDate.toString()}`);
+    players = findAllPlayers(playersRaw);
+  }
   const rows = transformYahooPlayersToRows(players, statMap, statWeights);
   state.players = rows;
+  state.currentLeague = league;
   renderTable();
 }
 
