@@ -13,6 +13,42 @@
     </header>
 
     <main class="container">
+      <section class="panel yahoo-panel" aria-label="Yahoo Fantasy">
+        <div class="yahoo-header">
+          <h2>Yahoo Fantasy</h2>
+          <span id="y-status" class="badge">Checking…</span>
+        </div>
+        <div class="yahoo-row">
+          <button id="y-connect" type="button">Sign in with Yahoo</button>
+          <button id="y-refresh" type="button">Refresh Data</button>
+        </div>
+        <div class="yahoo-row">
+          <label>Game
+            <select id="y-game"></select>
+          </label>
+          <label>League
+            <select id="y-league"></select>
+          </label>
+          <label>Team
+            <select id="y-team"></select>
+          </label>
+          <button id="y-load-roster" type="button">Load My Roster</button>
+        </div>
+        <div class="yahoo-row">
+          <label class="chk"><input id="y-highlight" type="checkbox"> Highlight my roster</label>
+          <label class="chk"><input id="y-filter" type="checkbox"> Filter to my roster</label>
+        </div>
+        <div class="yahoo-totals" id="y-totals" hidden>
+          <div><strong>Roster:</strong> <span id="y-count">0</span> players</div>
+          <div><strong>FPTS:</strong> <span id="y-fpts">0</span></div>
+          <div><strong>PTS:</strong> <span id="y-pts">0</span></div>
+          <div><strong>REB:</strong> <span id="y-reb">0</span></div>
+          <div><strong>AST:</strong> <span id="y-ast">0</span></div>
+          <div><strong>STL:</strong> <span id="y-stl">0</span></div>
+          <div><strong>BLK:</strong> <span id="y-blk">0</span></div>
+          <div><strong>MIN:</strong> <span id="y-min">0</span></div>
+        </div>
+      </section>
       <section class="toolbar" aria-label="Draft controls">
         <div class="tool">
           <label for="search">Search</label>
@@ -82,4 +118,3 @@
     <script src="draft.js" type="module"></script>
   </body>
   </html>
-
