@@ -62,9 +62,10 @@ module.exports = async (req, res) => {
   try {
     const q = getQuery(req);
     const leagueName = q.league_name || q.name;
-    if (!leagueName) {
+    const leagueUrl = q.league_url || "";
+    if (!leagueName && !leagueUrl) {
       res.statusCode = 400;
-      res.json({ error: "Missing league_name param" });
+      res.json({ error: "Provide league_name or league_url" });
       return;
     }
     const teamFilter = (q.team_filter || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -85,17 +86,28 @@ module.exports = async (req, res) => {
       for (const o of leagueObjs) {
         const lk = o.league_key || (o.league && o.league.league_key);
         const nm = o.name || (o.league && o.league.name);
-        if (lk && nm) leagues.push({ league_key: lk, name: nm });
+        const lid = (o.league && o.league.league_id) || o.league_id;
+        if (lk && nm) leagues.push({ league_key: lk, name: nm, league_id: lid });
       }
-      const target = leagues.find(l => ci(l.name) === ci(leagueName));
+      let target = null;
+      if (leagueUrl) {
+        const m = String(leagueUrl).match(/\/(\d+)(?:$|[\/?#])/);
+        const lid = m ? m[1] : null;
+        if (lid) target = leagues.find(l => (l.league_id && String(l.league_id) === lid) || (l.league_key && l.league_key.endsWith(`.l.${lid}`)));
+      }
+      if (!target && leagueName) target = leagues.find(l => ci(l.name) === ci(leagueName));
       if (!target) {
         return { error: `League not found: ${leagueName}`, leagues };
       }
 
       // 3) Get teams for this league
       const teamsResp = await listTeams(token, target.league_key);
-      const teamObjs = collectByKey(teamsResp, o => o.team_key && (o.name || o.nickname));
-      const teams = teamObjs.map(o => ({ team_key: o.team_key, name: o.name, nickname: o.managers && o.managers[0] && o.managers[0].nickname ? o.managers[0].nickname : o.name }));
+      const teamObjs = collectByKey(teamsResp, o => o.team_key);
+      const teams = teamObjs.map(o => {
+        const nameStr = typeof o.name === 'string' ? o.name : (o.name && (o.name.full || o.name.nickname)) || o.team_name || '';
+        const nickStr = o.team_name || (o.name && (o.name.nickname || o.name.full)) || o.nickname || nameStr;
+        return { team_key: o.team_key, name: nameStr, nickname: nickStr };
+      });
 
       // 4) Choose teams: filter by team_filter (match on nickname or name), else take first N
       const selected = [];

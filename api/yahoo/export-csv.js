@@ -92,15 +92,24 @@ function extractPlayersWithStats(playersJson) {
 }
 
 function statsArrayFromPlayer(player) {
-  const arrs = collect(player, o => Array.isArray(o.stats));
-  const out = [];
-  for (const a of arrs) {
-    for (const item of a) {
+  const bins = [];
+  (function scan(o){
+    if (!o) return;
+    if (Array.isArray(o)) return o.forEach(scan);
+    if (typeof o === 'object') {
+      if (o.stats && Array.isArray(o.stats)) bins.push(o.stats);
+      if (o.stats && o.stats.stats && Array.isArray(o.stats.stats)) bins.push(o.stats.stats);
+      for (const k in o) scan(o[k]);
+    }
+  })(player);
+  const arr = [];
+  for (const bin of bins) {
+    for (const item of bin) {
       const s = item.stat || item;
-      if (s && s.stat_id != null) out.push({ stat_id: String(s.stat_id), value: Number(s.value) });
+      if (s && s.stat_id != null) arr.push({ stat_id: String(s.stat_id), value: Number(s.value) });
     }
   }
-  return out;
+  return arr;
 }
 
 function csvEscape(v) {
@@ -197,8 +206,12 @@ module.exports = async (req, res) => {
 
       // 4) Teams, filter to requested
       const teamsResp = await listTeams(token, target.league_key);
-      const teamObjs = collect(teamsResp, o => o.team_key && (o.name || (o.managers && o.managers[0] && o.managers[0].nickname)));
-      let teams = teamObjs.map(o => ({ team_key: o.team_key, name: o.name, nickname: o.managers && o.managers[0] && o.managers[0].nickname ? o.managers[0].nickname : o.name }));
+      const teamObjs = collect(teamsResp, o => o.team_key);
+      let teams = teamObjs.map(o => {
+        const nameStr = typeof o.name === 'string' ? o.name : (o.name && (o.name.full || o.name.nickname)) || o.team_name || '';
+        const nickStr = o.team_name || (o.name && (o.name.nickname || o.name.full)) || o.nickname || nameStr;
+        return { team_key: o.team_key, name: nameStr, nickname: nickStr };
+      });
       if (teamFilter.length) {
         const wanted = teamFilter.map(ci);
         teams = teams.filter(t => {
