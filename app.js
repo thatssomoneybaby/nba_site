@@ -32,7 +32,7 @@ function formatNum(n) {
 function visibleRows() {
   const q = state.filters.query.trim().toLowerCase();
   const pos = state.filters.pos;
-  const onlyRoster = state.filters.onlyRoster;
+  const onlyRoster = state.filters.onlyRoster && state.myRoster && state.myRoster.size > 0;
   let rows = state.players;
   if (q) {
     rows = rows.filter((p) =>
@@ -263,6 +263,7 @@ async function initYahooPanel() {
   const leagueSel = document.getElementById("y-league");
   const teamSel = document.getElementById("y-team");
   const btnLoad = document.getElementById("y-load-roster");
+  const btnExport = document.getElementById("y-export-csv");
   const dateInput = document.getElementById("y-date");
   const btnToday = document.getElementById("y-today");
 
@@ -296,6 +297,20 @@ async function initYahooPanel() {
     refreshLeagueData();
   });
   if (dateInput) dateInput.addEventListener("change", () => { refreshLeagueData(); });
+
+  if (btnExport) btnExport.addEventListener('click', async () => {
+    try {
+      const leagueKey = (document.getElementById('y-league') || {}).value;
+      const teamKey = (document.getElementById('y-team') || {}).value;
+      if (!leagueKey) throw new Error('Select a league first');
+      const qs = new URLSearchParams({ league: leagueKey });
+      if (teamKey) qs.set('team_keys', teamKey);
+      // Trigger file download in same session (cookies included)
+      window.location.href = `/api/yahoo/export-csv?${qs.toString()}`;
+    } catch (e) {
+      console.error('Export CSV failed', e);
+    }
+  });
 
   async function loadGames() {
     try {
@@ -462,6 +477,9 @@ async function initYahooPanel() {
       // Turn on highlight by default
       const yHighlight = document.getElementById('y-highlight');
       if (yHighlight) { yHighlight.checked = true; state.filters.highlightRoster = true; }
+      // Enable roster filter checkbox now that we have a roster
+      const yFilter = document.getElementById('y-filter');
+      if (yFilter) yFilter.disabled = !(state.myRoster && state.myRoster.size);
       renderTable();
       renderTotals();
     } catch (e) {
@@ -473,6 +491,9 @@ async function initYahooPanel() {
   const pDate = getUrlParam('date');
   if (dateInput && pDate) dateInput.value = pDate;
   await loadGames();
+  // Disable roster filter until a roster is loaded
+  const yFilter = document.getElementById('y-filter');
+  if (yFilter) yFilter.disabled = !(state.myRoster && state.myRoster.size);
 }
 
 async function init() {

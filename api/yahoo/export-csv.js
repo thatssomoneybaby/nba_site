@@ -124,12 +124,14 @@ module.exports = async (req, res) => {
     const q = getQuery(req);
     const leagueUrl = q.league_url || '';
     const leagueName = q.league_name || '';
+    const leagueKey = q.league || '';
     const teamFilter = (q.team_filter || '').split(',').map(s => s.trim()).filter(Boolean);
+    const teamKeys = (q.team_keys || '').split(',').map(s => s.trim()).filter(Boolean);
     const limit = Math.max(1, Math.min(Number(q.limit || 3), 20));
 
-    if (!leagueUrl && !leagueName) {
+    if (!leagueUrl && !leagueName && !leagueKey) {
       res.statusCode = 400;
-      res.json({ error: 'Provide league_url or league_name' });
+      res.json({ error: 'Provide league (key), league_url or league_name' });
       return;
     }
 
@@ -140,31 +142,31 @@ module.exports = async (req, res) => {
       const gameKeys = Array.from(new Set(gameObjs.map(g => g.game_key).filter(Boolean)));
       if (!gameKeys.length) throw new Error('No games found');
 
-      // 2) Leagues across games
-      const leaguesResp = await listLeagues(token, gameKeys.join(','));
-      const leagueObjs = collect(leaguesResp, o => o.league_key || (o.league && o.league.league_key));
-      const leagues = [];
-      for (const o of leagueObjs) {
-        const L = o.league || o;
-        if (L.league_key && (L.name || L.league_id)) {
-          leagues.push({ league_key: L.league_key, name: L.name, league_id: L.league_id });
-        }
-      }
-
-      // Pick league by URL id or by name
+      // 2) Leagues across games (unless league key provided)
+      let leagues = [];
       let target = null;
+      if (leagueKey) {
+        target = { league_key: leagueKey, name: leagueKey };
+      } else {
+        const leaguesResp = await listLeagues(token, gameKeys.join(','));
+        const leagueObjs = collect(leaguesResp, o => o.league_key || (o.league && o.league.league_key));
+        for (const o of leagueObjs) {
+          const L = o.league || o;
+          if (L.league_key && (L.name || L.league_id)) {
+            leagues.push({ league_key: L.league_key, name: L.name, league_id: L.league_id });
+          }
+        }
+
+        // Pick league by URL id or by name
+      }
       if (leagueUrl) {
         const m = String(leagueUrl).match(/\/(\d+)(?:$|[\/?#])/);
         const lid = m ? m[1] : null;
         if (!lid) throw new Error('Could not parse league id from league_url');
-        target = leagues.find(l => (l.league_id && String(l.league_id) === lid) || (l.league_key && l.league_key.endsWith(`.l.${lid}`)));
+        if (!target) target = leagues.find(l => (l.league_id && String(l.league_id) === lid) || (l.league_key && l.league_key.endsWith(`.l.${lid}`)));
       }
-      if (!target && leagueName) {
-        target = leagues.find(l => ci(l.name) === ci(leagueName));
-      }
-      if (!target) {
-        return { error: 'League not found', leagues };
-      }
+      if (!target && leagueName) target = leagues.find(l => ci(l.name) === ci(leagueName));
+      if (!target) return { error: 'League not found', leagues };
 
       // 3) League settings and players (with stats)
       const settings = await leagueSettings(token, target.league_key);
@@ -212,14 +214,15 @@ module.exports = async (req, res) => {
         const nickStr = o.team_name || (o.name && (o.name.nickname || o.name.full)) || o.nickname || nameStr;
         return { team_key: o.team_key, name: nameStr, nickname: nickStr };
       });
-      if (teamFilter.length) {
+      if (teamFilter.length || teamKeys.length) {
         const wanted = teamFilter.map(ci);
         teams = teams.filter(t => {
           const n1 = ci(t.nickname || '');
           const n2 = ci(t.name || '');
           const hitEq = wanted.includes(n1) || wanted.includes(n2);
           const hitContains = wanted.some(w => (n1 && n1.includes(w)) || (n2 && n2.includes(w)));
-          return hitEq || hitContains;
+          const byKey = teamKeys.includes(String(t.team_key));
+          return hitEq || hitContains || byKey;
         });
       }
       teams = teams.slice(0, limit);
